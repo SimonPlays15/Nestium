@@ -1,0 +1,14 @@
+{
+  "name": "@nestium/shared",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.ts",
+  "types": "index.ts",
+  "author": "SimonPlays15",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "zod": "^4.2.1"
+  }
+}

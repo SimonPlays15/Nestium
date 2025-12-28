@@ -1,0 +1,9 @@
+{
+  "name": "nestium",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "npm --prefix apps/frontend run dev",
+    "dev:panel": "npm --prefix apps/panel-api run start:dev",
+    "dev:agent": "npm --prefix apps/agent run dev"
+  }
+}

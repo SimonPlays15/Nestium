@@ -1,0 +1,17 @@
+# Build outputs
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Testing
+coverage/
+
+# Logs
+npm-debug.log*
+
+# Git
+.git/
+test/
+node_modules/
