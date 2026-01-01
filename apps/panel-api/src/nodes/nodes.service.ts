@@ -1,8 +1,10 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { agentFetch } from "./agent/agent-client";
 import { PrismaService } from "../prisma/prisma.service";
 import crypto from "crypto";
 import { CreateEnrollmentDto } from "./dto/create-enroll.dto";
 import { RegisterNodeDto } from "./dto/register-node.dto";
+import { CreateAllocationsDto } from "./dto/create-allocations.dto";
 import {Prisma} from "@prisma/client";
 
 function sha256(input: string) {
@@ -65,4 +67,128 @@ export class NodesService {
             sharedSecret,
         };
     }
+
+    async listNodes(){
+        return this.prisma.node.findMany({
+            orderBy: {createdAt: "asc"},
+            select: {
+                id: true,
+                name: true,
+                endpointUrl: true,
+                status: true,
+                lastSeenAt: true,
+                agentVersion: true,
+                capacityJson: true,
+                createdAt: true,
+                updatedAt: true,
+            }
+        });
+    }
+
+    async getNode(id: string){
+        return this.prisma.node.findUnique({where: {id},
+            select: {
+            id: true,
+                name: true,
+                endpointUrl: true,
+                status: true,
+                lastSeenAt: true,
+                agentVersion: true,
+                capacityJson: true,
+                createdAt: true,
+                updatedAt: true,
+            }});
+    }
+
+    async pingNode(nodeId: string){
+        const node = await this.prisma.node.findUnique({where: {id: nodeId}});
+        if(!node) throw new NotFoundException("Node not found");
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+
+        try{
+            const res = await fetch(`${node.endpointUrl}`, {method: "GET", signal: controller.signal});
+            clearTimeout(timeout);
+            if(!res.ok) throw new Error(`Node ping failed with status ${res.status}`);
+            const health = await res.json().catch(() => ({}));
+            await this.prisma.node.update({
+                where: { id: node.id },
+                data: {
+                    status: "ONLINE",
+                    lastSeenAt: new Date(),
+                    // agentVersion optional aktualisieren, falls Agent es liefert
+                    agentVersion: typeof health?.agentVersion === "string" ? health.agentVersion : node.agentVersion,
+                },
+            });
+
+        } catch(error){
+            clearTimeout(timeout);
+
+            await this.prisma.node.update({
+                where: { id: node.id },
+                data: {
+                    status: "OFFLINE",
+                },
+            });
+
+            return { ok: false, nodeId: node.id, status: "OFFLINE" };
+        }
+    }
+
+    async pingAllNodes() {
+        const nodes = await this.prisma.node.findMany({ select: { id: true } });
+        const results = [];
+        for (const n of nodes) {
+            // @ts-ignore
+            results.push(await this.pingNode(n.id));
+        }
+        return results;
+    }
+
+    async authTest(nodeId: string, payload: any) {
+        const node = await this.prisma.node.findUnique({ where: { id: nodeId } });
+        if (!node) throw new NotFoundException("Node not found");
+
+        const res = await agentFetch({
+            nodeId: node.id,
+            sharedSecret: node.sharedSecret,
+            endpointUrl: node.endpointUrl,
+            path: "/v1/auth-test",
+            method: "POST",
+            body: payload ?? { hello: "nestium" },
+        });
+
+        const text = await res.text();
+        if (!res.ok) {
+            throw new BadRequestException(`Agent responded ${res.status}: ${text}`);
+        }
+        return JSON.parse(text);
+    }
+
+    async createAllocations(nodeId: string, dto: CreateAllocationsDto) {
+        const node = await this.prisma.node.findUnique({ where: { id: nodeId } });
+        if (!node) throw new NotFoundException("Node not found");
+
+        const ip = dto.ip ?? "0.0.0.0";
+        const protocol = (dto.protocol ?? "TCP") as any;
+
+        if (dto.startPort > dto.endPort) {
+            throw new BadRequestException("startPort must be <= endPort");
+        }
+
+        const ports: { nodeId: string; ip: string; port: number; protocol: any }[] = [];
+        for (let p = dto.startPort; p <= dto.endPort; p++) {
+            ports.push({ nodeId, ip, port: p, protocol });
+        }
+
+        // skipDuplicates verhindert Fehler, wenn du den Range nochmal anlegst
+        const result = await this.prisma.allocation.createMany({
+            data: ports,
+            skipDuplicates: true,
+        });
+
+        return { created: result.count };
+    }
+
 }

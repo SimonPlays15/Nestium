@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum NodeStatus {
+  ONLINE
+  OFFLINE
+}
+
+enum ServerState {
+  CREATED
+  RUNNING
+  STOPPED
+  ERROR
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(USER)
+  createdAt    DateTime @default(now())
+
+  servers Server[]
+}
+
+model Node {
+  id           String     @id @default(uuid())
+  name         String
+  endpointUrl  String
+  status       NodeStatus @default(OFFLINE)
+  lastSeenAt   DateTime?
+  agentVersion String?
+  capacityJson Json?
+
+  // Auth (HMAC shared secret)
+  sharedSecret String
+
+  servers     Server[]
+  enrollments NodeEnrollment[]
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  allocations Allocation[]
+}
+
+model NodeEnrollment {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  nodeId    String?
+  node      Node?     @relation(fields: [nodeId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Server {
+  id    String      @id @default(uuid())
+  name  String
+  type  String // "minecraft" fürs MVP
+  state ServerState @default(CREATED)
+
+  image       String
+  envJson     Json
+  limitsJson  Json
+  networkJson Json
+  storageJson Json
+
+  nodeId String
+  node   Node   @relation(fields: [nodeId], references: [id])
+
+  ownerId String
+  owner   User   @relation(fields: [ownerId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum PortProtocol {
+  TCP
+  UDP
+}
+
+model Allocation {
+  id     String @id @default(uuid())
+  nodeId String
+  node   Node   @relation(fields: [nodeId], references: [id])
+
+  ip       String       @default("0.0.0.0")
+  port     Int
+  protocol PortProtocol @default(TCP)
+
+  assignedServerId String?  @unique
+  createdAt        DateTime @default(now())
+
+  @@unique([nodeId, ip, port, protocol])
+  @@index([nodeId, assignedServerId])
+}

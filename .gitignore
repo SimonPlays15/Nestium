@@ -36,10 +36,6 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
-# Prisma
-prisma/migrations/**/*.sql
-!prisma/migrations/**/migration.sql
-
 # Temporary files
 *.tmp
 .temp/
