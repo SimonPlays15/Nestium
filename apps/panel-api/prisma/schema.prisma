@@ -106,3 +106,14 @@ model Allocation {
   @@unique([nodeId, ip, port, protocol])
   @@index([nodeId, assignedServerId])
 }
+
+model WsToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  serverId  String
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([serverId, userId])
+}

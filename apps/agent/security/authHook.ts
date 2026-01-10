@@ -31,20 +31,20 @@ function getRawBody(req: FastifyRequest): string {
 
 export async function hmacAuthHook(req: FastifyRequest, reply: FastifyReply) {
     // Allow unauth endpoints:
-    if (req.url === "/health") return;
+    if (req.url === "/health" || req.url?.startsWith("/health")) return;
 
-    const id = loadIdentity();
-    if (!id) {
+    const agentId = loadIdentity();
+    if (!agentId) {
         return reply.code(503).send({ error: "Agent not enrolled" });
     }
 
-    const nodeId = req.headers["x-node-id"];
+    const nodeIdHeader = req.headers["x-node-id"];
     const ts = req.headers["x-timestamp"];
     const bodyHash = req.headers["x-body-sha256"];
     const sig = req.headers["x-signature"];
 
     if (
-        typeof nodeId !== "string" ||
+        typeof nodeIdHeader !== "string" ||
         typeof ts !== "string" ||
         typeof bodyHash !== "string" ||
         typeof sig !== "string"
@@ -52,7 +52,7 @@ export async function hmacAuthHook(req: FastifyRequest, reply: FastifyReply) {
         return reply.code(401).send({ error: "Missing auth headers" });
     }
 
-    if (nodeId !== id.nodeId) {
+    if (nodeIdHeader !== agentId.nodeId) {
         return reply.code(401).send({ error: "Invalid node id" });
     }
 
@@ -67,20 +67,33 @@ export async function hmacAuthHook(req: FastifyRequest, reply: FastifyReply) {
         return reply.code(401).send({ error: "Timestamp out of range" });
     }
 
+    let computedBodyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // Empty string SHA256
+
+    if (req.method !== "GET" && req.method !== "HEAD") {
+        const rawBody = getRawBody(req);
+        computedBodyHash = sha256Hex(rawBody);
+    }
+
+    if (computedBodyHash !== bodyHash) {
+        console.log({ expected: bodyHash, got: computedBodyHash }, "Body hash mismatch");
+        return reply.code(401).send({ error: "Body hash mismatch" });
+    }
+
     const rawBody = getRawBody(req);
-    const computedBodyHash = sha256Hex(rawBody);
+    computedBodyHash = sha256Hex(rawBody);
 
     if (computedBodyHash !== bodyHash) {
         return reply.code(401).send({ error: "Body hash mismatch" });
     }
 
     const method = (req.method || "GET").toUpperCase();
-    const pathOnly = req.url.split("?")[0]; // IMPORTANT: path ohne query
+    const pathOnly = req.raw?.url?.split("?")[0] ?? "";
 
     const signingString = `${ts}.${method}.${pathOnly}.${bodyHash}`;
-    const computedSig = hmacSha256Hex(id.sharedSecret, signingString);
+    const computedSig = hmacSha256Hex(agentId.sharedSecret, signingString);
 
     if (!safeEqualHex(computedSig, sig)) {
-        return reply.code(401).send({ error: "Bad signature" });
+        console.log(`Auth failed! Path: ${pathOnly}, Expected: ${computedSig}, Got: ${sig}`);
+        return reply.code(401).send({error: "Bad signature"});
     }
 }

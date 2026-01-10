@@ -3,9 +3,16 @@ import {PrismaService} from "../prisma/prisma.service";
 import {agentFetch} from "../nodes/agent/agent-client";
 import {minecraftSpec} from "./templates/minecraft-template";
 import {Prisma} from "@prisma/client";
-
+import crypto from "crypto";
 function parseJsonSafe(text: string) {
     try { return JSON.parse(text); } catch { return null; }
+}
+
+function sha256Hex(input: string) {
+    return crypto.createHash("sha256").update(input).digest("hex");
+}
+function randomToken(bytes = 32) {
+    return crypto.randomBytes(bytes).toString("hex");
 }
 
 @Injectable()
@@ -247,5 +254,21 @@ export class ServersService {
         await this.prisma.server.delete({ where: { id: serverId } });
 
         return { ok: true };
+    }
+    // WS Token
+    async createWsToken(serverId: string, userId: string) {
+        // optional: prüfen ob server existiert
+        const server = await this.prisma.server.findUnique({ where: { id: serverId } });
+        if (!server) throw new NotFoundException("Server not found");
+
+        const token = randomToken(32);
+        const tokenHash = sha256Hex(token);
+        const expiresAt = new Date(Date.now() + 60_000); // 60s TTL fürs Upgrade
+
+        await this.prisma.wsToken.create({
+            data: { tokenHash, serverId, userId, expiresAt },
+        });
+
+        return { token, expiresAt };
     }
 }

@@ -1,20 +1,26 @@
 import Fastify from "fastify";
-import { z } from "zod";
+import {z} from "zod";
 import path from "path"
 import fs from "fs"
-import { hmacAuthHook } from "./security/authHook";
+import {hmacAuthHook} from "./security/authHook";
 import {
-  createOrReplaceContainer,
-  startContainer,
-  stopContainer,
-  deleteContainer,
-  tailLogs,
-  containerExists, containerStatus, restartContainer
+    containerExists,
+    containerStatus,
+    createOrReplaceContainer,
+    deleteContainer,
+    restartContainer,
+    startContainer,
+    stopContainer,
+    tailLogs
 } from "./docker/runtime";
-import { containerName } from "./docker/names";
-import { createDockerClient } from "./docker/client";
+import {containerName} from "./docker/names";
+import {createDockerClient} from "./docker/client";
 import websocket from "@fastify/websocket";
-import { ServerSpec } from "./docker/types";
+import {ServerSpec} from "./docker/types";
+
+// Random UUID v4 generator
+// @ts-ignore
+const uuidv4 = () => ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
 const RegisterResponseSchema = z.object({
   nodeId: z.string(),
@@ -26,16 +32,40 @@ type AgentIdentity = {
   sharedSecret: string;
 };
 
-const app = Fastify({ logger: true, trustProxy: true, });
-app.register(websocket);
-app.addHook("preHandler", hmacAuthHook);
-
 const port = Number(process.env.AGENT_PORT ?? "8081");
-const nodeName = process.env.NODE_NAME ?? "node";
+const nodeName = process.env.NODE_NAME ?? `nestium-Node-${uuidv4()}`;
 const endpointUrl = process.env.NODE_ENDPOINT_URL ?? `http://localhost:${port}`;
 const panelUrl = process.env.PANEL_URL ?? "http://localhost:3000";
 const enrollToken = process.env.ENROLL_TOKEN;
 const agentVersion = process.env.AGENT_VERSION ?? "0.1.0";
+
+const app = Fastify(
+    {
+      logger: {
+        name: nodeName,
+        serializers: {
+          res (reply){
+            return {
+              statusCode: reply.statusCode
+            }
+          },
+        },
+      transport: {
+        target: "pino-pretty",
+        options: {
+          colorize: true, translateTime: "HH:mm:ss Z", ignore: "pid,hostname"
+          }
+        },
+  }, trustProxy: true, });
+app.register(websocket, {
+    options: {
+        maxPayload: 1048576,
+        idleTimeout: 30000,
+    }
+});
+app.addHook("preHandler", hmacAuthHook);
+
+
 
 // Identity speichern wir lokal, damit der Agent nicht bei jedem Start neu registriert
 const dataDir = path.join(process.cwd(), "data");
@@ -126,65 +156,125 @@ app.post("/v1/auth-test", async (req) => {
  */
 
 const docker = createDockerClient();
+function sleep(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
+}
 
-app.get(
+app.get<{ Params: { id: string }, Querystring: { tail?: string } }>(
     "/v1/servers/:id/logs/stream",
     { websocket: true },
     (connection, req) => {
-      const serverId = (req.params as any).id as string;
-      const name = containerName(serverId);
-
-      let ended = false;
-
-      (async () => {
-        try {
-          const container = docker.getContainer(name);
-
-          // follow logs
-          const stream = await container.logs({
-            stdout: true,
-            stderr: true,
-            follow: true,
-            tail: 0,
-            timestamps: false,
-          });
-
-          const closeAll = () => {
-            if (ended) return;
-            ended = true;
-            try { (stream as any)?.destroy?.(); } catch {}
-            try { connection.socket.close(); } catch {}
-          };
-
-          connection.socket.on("close", closeAll);
-          connection.socket.on("error", closeAll);
-
-          // dockerode kann Buffer oder Stream liefern
-          if (Buffer.isBuffer(stream)) {
-            connection.socket.send(stream.toString("utf-8"));
-            closeAll();
-            return;
-          }
-
-          (stream as any).on("data", (chunk: Buffer) => {
-            // plain text (weil du Tty:true gesetzt hast)
-            try {
-              connection.socket.send(chunk.toString("utf-8"));
-            } catch {
-              closeAll();
-            }
-          });
-
-          (stream as any).on("end", closeAll);
-          (stream as any).on("error", closeAll);
-        } catch (e: any) {
-          // Wenn container nicht existiert o.ä.
-          try {
-            connection.socket.send(`ERROR: ${String(e?.message ?? e)}`);
-          } catch {}
-          try { connection.socket.close(); } catch {}
+        let serverId = req.params?.id;
+        if (!serverId || serverId === ':id') {
+            const rawUrl = req.raw?.url ?? "";
+            const urlPath = rawUrl.split("?")[0];
+            serverId = urlPath.split("/")[3];
         }
-      })();
+        if (!serverId) {
+            app.log.error({ rawUrl: req.raw.url, url: req.url }, "Handshake failed: serverId not found");
+            if(connection && connection.socket){
+                connection.socket.destroy();
+            }
+            return;
+        }
+
+        const tail = req.query?.tail ? parseInt(req.query.tail as string, 10) : 100;
+        app.log.info({ serverId, tail }, "Logs stream request accepted");
+
+        const name = containerName(serverId);
+        const container = docker.getContainer(name);
+
+        let closed = false;
+        let activeStream: any = null;
+
+        const closeAll = () => {
+            if (closed) return;
+            closed = true;
+            try { activeStream?.destroy?.(); } catch {}
+            try { connection.socket.close(); } catch {}
+        };
+
+        connection.socket.on("close", closeAll);
+        connection.socket.on("error", closeAll);
+
+    const attachOnce = () =>
+        new Promise<void>((resolve) => {
+            if (closed) return resolve();
+
+            container.logs(
+                {
+                    stdout: true,
+                    stderr: true,
+                    follow: true,
+                    tail,
+                    timestamps: false,
+                },
+                (err, stream) => {
+                    if (err || !stream) {
+                        app.log.error(err, "Failed to get logs from docker");
+                        connection.socket.send("ERROR: Could not attach to logs");
+                        return;
+                    }
+
+                    activeStream = stream;
+
+                    const handleData = (chunk: Buffer) => {
+                        if (closed) return;
+
+                        // Docker Multiplex Header (8 Bytes) entfernen falls vorhanden
+                        // Format: [STREAM_TYPE, 0, 0, 0, SIZE1, SIZE2, SIZE3, SIZE4]
+                        let offset = 0;
+                        while (offset < chunk.length) {
+                            if (chunk.length - offset < 8) {
+                                // Rest zu klein für Header, als Plain senden
+                                connection.socket.send(chunk.slice(offset).toString('utf-8'));
+                                break;
+                            }
+
+                            const type = chunk.readUInt8(offset);
+                            if (type >= 0 && type <= 3) { // 0, 1, 2 sind gültige Docker Stream Typen
+                                const size = chunk.readUInt32BE(offset + 4);
+                                const end = offset + 8 + size;
+                                const message = chunk.slice(offset + 8, Math.min(end, chunk.length));
+                                connection.socket.send(message.toString('utf-8'));
+                                offset = end;
+                            } else {
+                                // Kein erkennbarer Header, sende restliches Chunk
+                                connection.socket.send(chunk.slice(offset).toString('utf-8'));
+                                break;
+                            }
+                        }
+                    };
+
+                    // WICHTIG: Streams in Node.js können im paused state starten
+                    if (typeof (stream as any).on === 'function') {
+                        (stream as any).on('data', handleData);
+                        (stream as any).on('error', () => closeAll());
+                        (stream as any).on('end', () => closeAll());
+
+                        // Explizit resume aufrufen, falls es ein Readable Stream ist
+                        if ((stream as any).resume) (stream as any).resume();
+                    }
+                }
+            );
+        });
+
+    (async () => {
+        // Keep reattaching while WS alive
+        while (!closed) {
+            await attachOnce();
+            if (closed) break;
+            await sleep(800); // backoff to avoid tight loop
+        }
+    })().catch(() => closeAll());
+});
+
+app.get<{ Params: { id: string }; Querystring: { tail?: string } }>(
+    "/v1/servers/:id/logs",
+    async (req) => {
+        const tail = req.query.tail ? Number(req.query.tail) : 200;
+        const text = await tailLogs(req.params.id, Number.isFinite(tail) ? tail : 200);
+        return { ok: true, logs: text };
     }
 );
 
@@ -197,6 +287,10 @@ app.post<{ Params: { id: string }; Body: Omit<ServerSpec, "serverId"> }>(
       return { ok: true, ...result };
     }
 );
+
+/**
+ * Server lifecycle management.
+ */
 
 app.get<{ Params: { id: string } }>("/v1/servers/:id/exists", async (req) => {
   const exists = await containerExists(req.params.id);
@@ -227,20 +321,16 @@ app.delete<{ Params: { id: string } }>("/v1/servers/:id", async (req) => {
   await deleteContainer(req.params.id);
   return { ok: true };
 });
-app.get<{ Params: { id: string }; Querystring: { tail?: string } }>(
-    "/v1/servers/:id/logs",
-    async (req) => {
-      const tail = req.query.tail ? Number(req.query.tail) : 200;
-      const text = await tailLogs(req.params.id, Number.isFinite(tail) ? tail : 200);
-      return { ok: true, logs: text };
-    }
-);
+
 
 async function main() {
   await enrollIfNeeded();
 
   await app.listen({ port, host: "0.0.0.0" });
   app.log.info(`Agent listening on ${endpointUrl}`);
+  app.log.info(`Panel URL: ${panelUrl}`);
+  app.log.info(`Node name: ${nodeName}`);
+  app.log.info(`Agent version: ${agentVersion}`);
 }
 
 main().catch((err) => {

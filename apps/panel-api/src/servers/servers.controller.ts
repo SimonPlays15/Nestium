@@ -40,4 +40,11 @@ export class ServersController {
     delete(@Param("id") id: string) {
         return this.servers.delete(id);
     }
+
+    // WS Tokens
+    @Post(":id/ws-token")
+    wsToken(@Param("id") id: string) {
+        // MVP: userId hardcoded/kommt später aus Auth
+        return this.servers.createWsToken(id, "dev-user");
+    }
 }
