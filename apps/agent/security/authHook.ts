@@ -1,7 +1,7 @@
-import { FastifyRequest, FastifyReply } from "fastify";
-import { hmacSha256Hex, safeEqualHex, sha256Hex } from "./hmac";
+import {FastifyReply, FastifyRequest} from "fastify";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 
 type AgentIdentity = {
     nodeId: string;
@@ -20,80 +20,111 @@ function loadIdentity(): AgentIdentity | null {
         return null;
     }
 }
+const EMPTY_SHA256 =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+function sha256Hex(input: string) {
+    return crypto.createHash("sha256").update(input).digest("hex");
+}
 
-function getRawBody(req: FastifyRequest): string {
-    // In Fastify ist req.body schon geparst; wir signieren für MVP den JSON-stringify.
-    // Für perfekte Signaturen später: rawBody Plugin nutzen.
+function hmacSha256Hex(secret: string, input: string) {
+    return crypto.createHmac("sha256", secret).update(input).digest("hex");
+}
+
+function safeTimingEqualHex(a: string, b: string) {
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+function methodHasBody(method: string) {
+    return ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+}
+
+function isWebSocketUpgrade(req: FastifyRequest) {
+    const u = String(req.raw?.headers?.upgrade ?? "").toLowerCase();
+    return u === "websocket" || (req as any).ws || (req.raw as any)?.upgrade === true;
+}
+
+async function readRawBody(req: FastifyRequest): Promise<string> {
     if (!req.body) return "";
     if (typeof req.body === "string") return req.body;
     return JSON.stringify(req.body);
 }
 
+async function getNodeSharedSecret(nodeId: string): Promise<string | null> {
+    const identity = loadIdentity();
+    if (identity && identity.nodeId === nodeId) return identity.sharedSecret;
+    return null;
+}
+
+/**
+ * HMAC Auth Hook (Fastify)
+ */
 export async function hmacAuthHook(req: FastifyRequest, reply: FastifyReply) {
-    // Allow unauth endpoints:
-    if (req.url === "/health" || req.url?.startsWith("/health")) return;
+    const initiateTime = Date.now();
+    const rawUrl = String(req.raw?.url ?? "");
+    const path = rawUrl.split("?")[0];
+    if (path === "/health" || path === "/ws-test") return;
 
-    const agentId = loadIdentity();
-    if (!agentId) {
-        return reply.code(503).send({ error: "Agent not enrolled" });
+    const isWs = isWebSocketUpgrade(req);
+
+    const nodeId = req.headers["x-node-id"] as string | undefined;
+    const tsHeader = req.headers["x-timestamp"] as string | undefined;
+    const sigHeader = req.headers["x-signature"] as string | undefined;
+    const bodyHashHeader = req.headers["x-body-sha256"] as string | undefined;
+
+    if (!nodeId || !tsHeader || !sigHeader || !bodyHashHeader) {
+        reply.code(401).send({ error: "Missing authentication headers" });
+        return;
     }
 
-    const nodeIdHeader = req.headers["x-node-id"];
-    const ts = req.headers["x-timestamp"];
-    const bodyHash = req.headers["x-body-sha256"];
-    const sig = req.headers["x-signature"];
-
-    if (
-        typeof nodeIdHeader !== "string" ||
-        typeof ts !== "string" ||
-        typeof bodyHash !== "string" ||
-        typeof sig !== "string"
-    ) {
-        return reply.code(401).send({ error: "Missing auth headers" });
+    const ts = Number(tsHeader);
+    if (!Number.isFinite(ts)) {
+        reply.code(401).send({ error: "Invalid timestamp" });
+        return;
     }
 
-    if (nodeIdHeader !== agentId.nodeId) {
-        return reply.code(401).send({ error: "Invalid node id" });
+    // replay window 60s
+    if (Math.abs(Date.now() - ts) > 60_000) {
+        reply.code(401).send({ error: "Timestamp expired" });
+        return;
     }
 
-    const now = Date.now();
-    const tsNum = Number(ts);
-    if (!Number.isFinite(tsNum)) {
-        return reply.code(401).send({ error: "Invalid timestamp" });
+    const method = String(req.raw?.method ?? req.method ?? "GET").toUpperCase();
+    const pathOnly = rawUrl.split("?")[0];
+
+    // Body hash: WS + GET/HEAD -> empty, else read
+    let computedBodyHash = EMPTY_SHA256;
+    if (!isWs && methodHasBody(method)) {
+        const body = await readRawBody(req);
+        computedBodyHash = sha256Hex(body);
     }
 
-    const skewMs = Math.abs(now - tsNum);
-    if (skewMs > 60_000) {
-        return reply.code(401).send({ error: "Timestamp out of range" });
+    if (!computedBodyHash) {
+        reply.code(428).send({ error: "Body hash missing" });
+        return;
     }
 
-    let computedBodyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // Empty string SHA256
-
-    if (req.method !== "GET" && req.method !== "HEAD") {
-        const rawBody = getRawBody(req);
-        computedBodyHash = sha256Hex(rawBody);
+    if (computedBodyHash !== bodyHashHeader) {
+        reply.code(401).send({ error: "Body hash mismatch" });
+        return;
     }
 
-    if (computedBodyHash !== bodyHash) {
-        console.log({ expected: bodyHash, got: computedBodyHash }, "Body hash mismatch");
-        return reply.code(401).send({ error: "Body hash mismatch" });
+    const sharedSecret = await getNodeSharedSecret(nodeId);
+    if (!sharedSecret) {
+        reply.code(401).send({ error: "Unknown node" });
+        return;
     }
 
-    const rawBody = getRawBody(req);
-    computedBodyHash = sha256Hex(rawBody);
+    const signingString = `${tsHeader}.${method}.${pathOnly}.${computedBodyHash}`;
+    const expectedSig = hmacSha256Hex(sharedSecret, signingString);
 
-    if (computedBodyHash !== bodyHash) {
-        return reply.code(401).send({ error: "Body hash mismatch" });
+    if (!safeTimingEqualHex(sigHeader, expectedSig)) {
+        reply.code(401).send({ error: "Invalid signature" });
+        return;
     }
 
-    const method = (req.method || "GET").toUpperCase();
-    const pathOnly = req.raw?.url?.split("?")[0] ?? "";
+    const timeNow = Date.now();
 
-    const signingString = `${ts}.${method}.${pathOnly}.${bodyHash}`;
-    const computedSig = hmacSha256Hex(agentId.sharedSecret, signingString);
-
-    if (!safeEqualHex(computedSig, sig)) {
-        console.log(`Auth failed! Path: ${pathOnly}, Expected: ${computedSig}, Got: ${sig}`);
-        return reply.code(401).send({error: "Bad signature"});
-    }
+    console.log(Date.now() - initiateTime, "HMAC Auth Hook", method, pathOnly, nodeId, timeNow - initiateTime, "ms");
+    // OK -> allow request
 }

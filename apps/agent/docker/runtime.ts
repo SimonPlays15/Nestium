@@ -1,6 +1,6 @@
-import { createDockerClient } from "./client";
-import { containerName, volumeName } from "./names";
-import { ServerSpec } from "./types";
+import {createDockerClient} from "./client";
+import {containerName, volumeName} from "./names";
+import {ServerSpec} from "./types";
 import {Readable} from "stream";
 
 const docker = createDockerClient();
@@ -33,8 +33,9 @@ export async function ensureVolume(serverId: string) {
 }
 
 export async function createOrReplaceContainer(spec: ServerSpec) {
+    console.log("createOrReplaceContainer", {spec});
     const name = containerName(spec.serverId);
-
+    console.log("createOrReplaceContainer", {name});
     // remove if exists
     try {
         const existing = docker.getContainer(name);
@@ -42,7 +43,8 @@ export async function createOrReplaceContainer(spec: ServerSpec) {
         // stop if running (ignore errors)
         try { await existing.stop({ t: 5 }); } catch {}
         await existing.remove({ force: true });
-    } catch {
+    } catch (err) {
+        console.error("Failed to remove existing container", {name, error: err});
         // doesn't exist
     }
 
@@ -50,6 +52,7 @@ export async function createOrReplaceContainer(spec: ServerSpec) {
     const vol = await ensureVolume(spec.serverId);
 
     const envArr = Object.entries(spec.env).map(([k, v]) => `${k}=${v}`);
+    console.log("createOrReplaceContainer", {envArr});
 
     const exposedPorts: Record<string, {}> = {};
     const portBindings: Record<string, Array<{ HostPort: string }>> = {};
@@ -85,6 +88,7 @@ export async function createOrReplaceContainer(spec: ServerSpec) {
         AttachStdin: true,
         AttachStdout: true,
         AttachStderr: true,
+        OpenStdin: true,
         Labels: {
             "nestium.serverId": spec.serverId,
             "nestium.managed": "true",

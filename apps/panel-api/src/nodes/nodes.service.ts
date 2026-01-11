@@ -108,7 +108,7 @@ export class NodesService {
         const timeout = setTimeout(() => controller.abort(), 2000);
 
         try{
-            const res = await fetch(`${node.endpointUrl}`, {method: "GET", signal: controller.signal});
+            const res = await fetch(`${node.endpointUrl}/health`, {method: "GET", signal: controller.signal});
             clearTimeout(timeout);
             if(!res.ok) throw new Error(`Node ping failed with status ${res.status}`);
             const health = await res.json().catch(() => ({}));
@@ -117,7 +117,6 @@ export class NodesService {
                 data: {
                     status: "ONLINE",
                     lastSeenAt: new Date(),
-                    // agentVersion optional aktualisieren, falls Agent es liefert
                     agentVersion: typeof health?.agentVersion === "string" ? health.agentVersion : node.agentVersion,
                 },
             });

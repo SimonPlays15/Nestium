@@ -1,7 +1,8 @@
-<script setup lang="ts">
-import { ref, nextTick } from "vue";
+<script lang="ts" setup>
+import {nextTick, ref} from "vue";
 
 const showSystemLogs = ref(false);
+const command = ref("");
 
 const SYSTEM_PREFIXES = ["[init]", "[cont-init.d]", "[services.d]"];
 
@@ -10,6 +11,7 @@ const logContainer = ref<HTMLDivElement | null>(null);
 
 const MAX_LINES = 5000;
 let autoScroll = true;
+
 function appendToLog(raw: string) {
   if (!raw) return;
 
@@ -34,6 +36,32 @@ function appendToLog(raw: string) {
     if (!autoScroll || !logContainer.value) return;
     logContainer.value.scrollTop = logContainer.value.scrollHeight;
   });
+}
+let wsConsole: WebSocket | undefined;
+async function connectToConsole(serverId: string) {
+  const r = await fetch(`http://127.0.0.1:3000/servers/${serverId}/ws-token`, { method: "POST" });
+  const { token } = await r.json();
+  wsConsole = new WebSocket(`ws://localhost:3000/ws/console?serverId=${serverId}&token=${token}`);
+}
+
+async function sendCommand(serverId: string, command: string){
+  if(!wsConsole) {
+    console.log("wsConsole not connected");
+    return;
+  }
+
+  if(wsConsole.readyState !== 1){
+    console.log(`wsConsole not connected, status ${wsConsole.readyState}`);
+    await connectToConsole(serverId)
+    return;
+  }
+
+  if(wsConsole.readyState !== wsConsole.OPEN){
+    setTimeout(() => sendCommand(serverId, command), 1000);
+    return;
+  }
+
+  wsConsole.send(JSON.stringify({ type: "cmd", data: command }))
 }
 
 async function connectLogs(serverId: string) {
@@ -75,13 +103,13 @@ function onLogScroll() {
   autoScroll = distanceFromBottom < 50;
 }
 
-connectLogs("b86a8ef8-d45c-4191-8fce-b1e1066e2a15")
-
+connectLogs("a54ff461-774a-4ee5-975e-d18d9f8998c4")
+connectToConsole("a54ff461-774a-4ee5-975e-d18d9f8998c4")
 </script>
 
 <template>
   <label class="toggle">
-    <input type="checkbox" v-model="showSystemLogs" />
+    <input v-model="showSystemLogs" type="checkbox" />
     Systemlogs anzeigen
   </label>
 
@@ -91,6 +119,10 @@ connectLogs("b86a8ef8-d45c-4191-8fce-b1e1066e2a15")
     @scroll="onLogScroll"
   >
     <pre v-for="(line, i) in logLines" :key="i">{{ line }}</pre>
+    <form @submit.prevent="sendCommand('a54ff461-774a-4ee5-975e-d18d9f8998c4', command)">
+      <input v-model="command" placeholder="Befehl eingeben" type="text" />
+      <button type="submit">Senden</button>
+    </form>
   </div>
 </template>
 

@@ -7,7 +7,7 @@
   "types": "index.ts",
   "author": "SimonPlays15",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "zod": "^4.2.1"
   }
