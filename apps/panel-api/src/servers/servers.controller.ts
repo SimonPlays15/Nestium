@@ -1,5 +1,5 @@
 import {Body, Controller, Delete, Get, Param, Post, Query} from "@nestjs/common";
-import { ServersService } from "./servers.service";
+import {ServersService} from "./servers.service";
 
 @Controller("servers")
 export class ServersController {
@@ -14,6 +14,11 @@ export class ServersController {
     @Get(":id/logs")
     logs(@Param("id") id: string, @Query("tail") tail?: string) {
         return this.servers.logs(id, tail ? Number(tail) : 200);
+    }
+
+    @Get(":id/status")
+    status(@Param("id") id: string) {
+        return this.servers.status(id);
     }
 
     @Post(":id/start")

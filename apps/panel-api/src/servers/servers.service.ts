@@ -4,6 +4,7 @@ import {agentFetch} from "../nodes/agent/agent-client";
 import {minecraftSpec} from "./templates/minecraft-template";
 import {Prisma} from "@prisma/client";
 import crypto from "crypto";
+
 function parseJsonSafe(text: string) {
     try { return JSON.parse(text); } catch { return null; }
 }
@@ -144,30 +145,6 @@ export class ServersService {
             data: { assignedServerId: null },
         });
     }
-    private async getServerAndNode(serverId: string) {
-        const server = await this.prisma.server.findUnique({ where: { id: serverId } });
-        if (!server) throw new NotFoundException("Server not found");
-
-        const node = await this.prisma.node.findUnique({ where: { id: server.nodeId } });
-        if (!node) throw new NotFoundException("Node not found");
-
-        return { server, node };
-    }
-
-    private async agentCall(node: any, path: string, method: string, body?: any) {
-        const res = await agentFetch({
-            nodeId: node.id,
-            sharedSecret: node.sharedSecret,
-            endpointUrl: node.endpointUrl,
-            path,
-            method,
-            body,
-        });
-
-        const text = await res.text().catch(() => "");
-        const json = parseJsonSafe(text);
-        return { res, text, json };
-    }
 
     async syncStatus(serverId: string) {
         const { server, node } = await this.getServerAndNode(serverId);
@@ -255,6 +232,16 @@ export class ServersService {
 
         return { ok: true };
     }
+
+    async status(serverId: string) {
+        const { server, node } = await this.getServerAndNode(serverId);
+
+        const {res, text} = await this.agentCall(node, `/v1/servers/${serverId}/status`, "GET");
+        if(!res.ok) throw new BadRequestException(`Agent status failed ${res.status}: ${text}`);
+
+        return JSON.parse(text);
+    }
+
     // WS Token
     async createWsToken(serverId: string, userId: string) {
         // optional: prüfen ob server existiert
@@ -270,5 +257,30 @@ export class ServersService {
         });
 
         return { token, expiresAt };
+    }
+
+    private async getServerAndNode(serverId: string) {
+        const server = await this.prisma.server.findUnique({ where: { id: serverId } });
+        if (!server) throw new NotFoundException("Server not found");
+
+        const node = await this.prisma.node.findUnique({ where: { id: server.nodeId } });
+        if (!node) throw new NotFoundException("Node not found");
+
+        return { server, node };
+    }
+
+    private async agentCall(node: any, path: string, method: string, body?: any) {
+        const res = await agentFetch({
+            nodeId: node.id,
+            sharedSecret: node.sharedSecret,
+            endpointUrl: node.endpointUrl,
+            path,
+            method,
+            body,
+        });
+
+        const text = await res.text().catch(() => "");
+        const json = parseJsonSafe(text);
+        return { res, text, json };
     }
 }
