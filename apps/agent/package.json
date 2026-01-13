@@ -1,14 +1,19 @@
 {
   "name": "agent",
   "version": "1.0.0",
-  "description": "",
+  "description": "Agent for the Nestium Panel",
   "scripts": {
     "dev": "ts-node-dev index.ts",
     "build": "tsc",
     "start": "node dist/index.ts"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "nestium",
+    "docker",
+    "agent",
+    "node"
+  ],
+  "author": "SimonPlays15",
   "license": "ISC",
   "dependencies": {
     "@fastify/websocket": "^11.2.0",

@@ -1,8 +1,13 @@
 {
   "name": "panel-api",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "API for the Nestium Panel",
+  "author": "SimonPlays15",
+  "keywords": [
+    "nestium",
+    "docker",
+    "api"
+  ],
   "private": true,
   "license": "UNLICENSED",
   "scripts": {

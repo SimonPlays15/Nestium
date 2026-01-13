@@ -1,12 +1,24 @@
-import {OnGatewayConnection, OnGatewayDisconnect, WebSocketGateway, WebSocketServer,} from '@nestjs/websockets';
-import WebSocket, {Server} from 'ws';
-import {IncomingMessage} from 'http';
-import {PrismaService} from '../prisma/prisma.service';
-import {agentSignedHeaders} from '../nodes/agent/agent-client';
+import { OnGatewayConnection, OnGatewayDisconnect, WebSocketGateway, WebSocketServer, } from '@nestjs/websockets';
+import WebSocket, { Server } from 'ws';
+import { IncomingMessage } from 'http';
+import { PrismaService } from '../prisma/prisma.service';
+import { agentSignedHeaders } from '../nodes/agent/agent-client';
 import crypto from 'crypto';
-import {toWsUrl} from '@nestium/shared';
+import { toWsUrl } from '@nestium/shared';
 
-function safeWsClose(ws: WebSocket | null, code = 1000, reason = "closed") {
+/**
+ * Safely closes a WebSocket connection if it exists and is in a valid state.
+ *
+ * @param {WebSocket|null} ws - The WebSocket instance to close. Can be null.
+ * @param {number} [code=1000] - The status code to indicate the reason for closure. Defaults to 1000.
+ * @param {string} [reason="closed"] - The reason for the closure. Defaults to "closed".
+ * @return {void} This function does not return a value.
+ */
+function safeWsClose(
+  ws: WebSocket | null,
+  code: number = 1000,
+  reason: string = 'closed',
+): void {
   if (!ws) return;
   try {
     if (ws.readyState === WebSocket.CONNECTING) return ws.terminate();
@@ -14,8 +26,17 @@ function safeWsClose(ws: WebSocket | null, code = 1000, reason = "closed") {
   } catch {}
 }
 
+/**
+ * WebSocket gateway for handling server logs streaming functionality.
+ *
+ * This gateway facilitates WebSocket connections to provide log streams from servers to clients.
+ * It validates incoming connection requests with a token mechanism and establishes a proxied
+ * connection to the respective server node for stream forwarding.
+ */
 @WebSocketGateway({ path: '/ws/logs' })
-export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ServersLogsGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server | undefined;
 
@@ -33,9 +54,15 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
 
     // Token Validierung
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const wsToken = await this.prisma.wsToken.findUnique({ where: { tokenHash } });
+    const wsToken = await this.prisma.wsToken.findUnique({
+      where: { tokenHash },
+    });
 
-    if (!wsToken || wsToken.serverId !== serverId || wsToken.expiresAt < new Date()) {
+    if (
+      !wsToken ||
+      wsToken.serverId !== serverId ||
+      wsToken.expiresAt < new Date()
+    ) {
       client.close(1008, 'Invalid or expired token');
       return;
     }
@@ -54,7 +81,8 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
     this.proxyToAgent(client, serverData, serverId);
   }
 
-  handleDisconnect(client: WebSocket) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  handleDisconnect(_client: WebSocket) {
     // Cleanup wird durch die proxyToAgent Logik erledigt
   }
 
@@ -62,6 +90,7 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
     const node = serverData.node;
 
     const agentPath = `/v1/servers/${serverId}/logs/stream`; // signiert OHNE query
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     const agentUrl = `${toWsUrl(node.endpointUrl)}${agentPath}?tail=0`;
 
     let agentWs: WebSocket | null = null;
@@ -78,8 +107,10 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
     };
 
     const cleanupAgent = () => {
-      try { agentWs?.removeAllListeners(); } catch {}
-      safeWsClose(agentWs, 1000, "cleanup");
+      try {
+        agentWs?.removeAllListeners();
+      } catch {}
+      safeWsClose(agentWs, 1000, 'cleanup');
       agentWs = null;
     };
 
@@ -92,25 +123,34 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
       }, ms);
     };
 
-    const closeAll = (code = 1000, reason = "closed") => {
+    const closeAll = (code = 1000, reason = 'closed') => {
       if (closed) return;
       closed = true;
 
       if (reconnectTimer) {
-        try { clearTimeout(reconnectTimer); } catch {}
+        try {
+          clearTimeout(reconnectTimer);
+        } catch {}
         reconnectTimer = null;
       }
 
       cleanupAgent();
-      try { clearInterval(pingTimer); } catch {}
+      try {
+        clearInterval(pingTimer);
+      } catch {}
 
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       safeWsClose(clientWs as any, code, reason);
     };
 
     // Keepalive pings
     const pingTimer = setInterval(() => {
-      try { if (clientWs.readyState === WebSocket.OPEN) clientWs.ping(); } catch {}
-      try { if (agentWs && agentWs.readyState === WebSocket.OPEN) agentWs.ping(); } catch {}
+      try {
+        if (clientWs.readyState === WebSocket.OPEN) clientWs.ping();
+      } catch {}
+      try {
+        if (agentWs && agentWs.readyState === WebSocket.OPEN) agentWs.ping();
+      } catch {}
     }, 25_000);
 
     const sendTail = async () => {
@@ -119,17 +159,19 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
         const headers = agentSignedHeaders({
           nodeId: node.id,
           sharedSecret: node.sharedSecret,
-          method: "GET",
+          method: 'GET',
           path: tailPath,
-          bodyStr: "",
+          bodyStr: '',
         });
 
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
         const res = await fetch(`${node.endpointUrl}${tailPath}`, { headers });
         if (!res.ok) return;
 
         const json = await res.json().catch(() => null);
-        const logsText = json?.logs ?? "";
-        if (logsText) sendToClient({ type: "tail", data: logsText });
+        const logsText = json?.logs ?? '';
+        if (logsText) sendToClient({ type: 'tail', data: logsText });
       } catch {
         // ignore
       }
@@ -144,60 +186,71 @@ export class ServersLogsGateway implements OnGatewayConnection, OnGatewayDisconn
       const headers = agentSignedHeaders({
         nodeId: node.id,
         sharedSecret: node.sharedSecret,
-        method: "GET",
+        method: 'GET',
         path: agentPath, // ✅ OHNE query signieren
-        bodyStr: "",
+        bodyStr: '',
       });
 
       console.log(`Connecting to Agent WS: ${agentUrl}`);
 
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-expect-error
       const ws = new WebSocket(agentUrl, { headers, handshakeTimeout: 20_000 });
       agentWs = ws;
 
       // IMPORTANT: always have an error listener (prevents "Unhandled 'error' event")
-      ws.on("error", () => {});
+      ws.on('error', () => {});
 
-      ws.on("unexpected-response", (_req, res) => {
+      ws.on('unexpected-response', (_req, res) => {
         connecting = false;
         console.error(`Agent rejected connection: ${res.statusCode}`);
 
         // ✅ kill this socket and retry
-        try { ws.terminate(); } catch {}
-        sendToClient({ type: "agent", status: "rejected", code: res.statusCode });
+        try {
+          ws.terminate();
+        } catch {}
+        sendToClient({
+          type: 'agent',
+          status: 'rejected',
+          code: res.statusCode,
+        });
 
         scheduleReconnect(1200);
       });
 
-      ws.on("open", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-misused-promises
+      ws.on('open', async () => {
         connecting = false;
-        console.log("Connected to Agent successfully");
-        sendToClient({ type: "agent", status: "connected" });
+        console.log('Connected to Agent successfully');
+        sendToClient({ type: 'agent', status: 'connected' });
 
         await sendTail(); // ✅ resync on every connect
       });
 
-      ws.on("message", (data) => {
-        const payload = Buffer.isBuffer(data) ? data.toString("utf-8") : data.toString();
-        sendToClient({ type: "live", data: payload });
+      ws.on('message', (data) => {
+        const payload = Buffer.isBuffer(data)
+          ? data.toString('utf-8')
+          : data.toString();
+        sendToClient({ type: 'live', data: payload });
       });
 
-      ws.on("close", (code, reason) => {
+      ws.on('close', (code, reason) => {
         connecting = false;
-        console.log(`Agent WS closed: ${code} ${reason?.toString?.() ?? ""}`);
+        console.log(`Agent WS closed: ${code} ${reason?.toString?.() ?? ''}`);
 
-        sendToClient({ type: "agent", status: "disconnected", code });
+        sendToClient({ type: 'agent', status: 'disconnected', code });
         scheduleReconnect(900);
       });
 
-      ws.on("error", (err) => {
+      ws.on('error', (err) => {
         connecting = false;
-        console.error("Agent WS Error:", err);
+        console.error('Agent WS Error:', err);
         scheduleReconnect(900);
       });
     };
 
-    clientWs.on("close", () => closeAll(1000, "client closed"));
-    clientWs.on("error", () => closeAll(1011, "client error"));
+    clientWs.on('close', () => closeAll(1000, 'client closed'));
+    clientWs.on('error', () => closeAll(1011, 'client error'));
 
     connectAgent();
   }

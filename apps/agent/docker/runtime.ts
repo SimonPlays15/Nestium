@@ -3,9 +3,22 @@ import {containerName, volumeName} from "./names";
 import {ServerSpec} from "./types";
 import {Readable} from "stream";
 
+/**
+ * Represents an instance of a Docker client used to interact with Docker containers,
+ * images, networks, and other Docker resources.
+ *
+ * This variable is initialized with a Docker client object, providing methods to
+ * manage and communicate with the Docker Engine API.
+ */
 const docker = createDockerClient();
 
-export async function ensureImage(image: string) {
+/**
+ * Ensures that the specified Docker image is available locally. If the image is missing, it pulls the image from the repository.
+ *
+ * @param {string} image - The name of the Docker image, including the tag or version, to check and pull if necessary.
+ * @return {Promise<void>} A promise that resolves when the image is confirmed to be available locally, either by being already present or successfully pulled.
+ */
+export async function ensureImage(image: string): Promise<void> {
     // Pull image if missing
     try {
         await docker.getImage(image).inspect();
@@ -21,7 +34,13 @@ export async function ensureImage(image: string) {
     }
 }
 
-export async function ensureVolume(serverId: string) {
+/**
+ * Ensures that a Docker volume exists for the provided server ID. If the volume does not exist, it creates a new one.
+ *
+ * @param {string} serverId - The unique identifier of the server for which the volume is ensured.
+ * @return {Promise<string>} A promise that resolves to the name of the existing or newly created volume.
+ */
+export async function ensureVolume(serverId: string): Promise<string> {
     const name = volumeName(serverId);
     try {
         await docker.getVolume(name).inspect();
@@ -32,7 +51,18 @@ export async function ensureVolume(serverId: string) {
     }
 }
 
-export async function createOrReplaceContainer(spec: ServerSpec) {
+/**
+ * Creates or replaces a Docker container for the specified server configuration.
+ *
+ * @param {ServerSpec} spec - The server configuration specifying container properties, including server ID, image, environment variables, ports, memory, CPUs, and other metadata.
+ *
+ * @return {Promise<{containerId: string, name: string, volume: string}>} A promise that resolves to an object containing the container ID, name, and associated volume name upon successful creation or replacement of the container.
+ */
+export async function createOrReplaceContainer(spec: ServerSpec): Promise<{
+    containerId: string;
+    name: string;
+    volume: string;
+}> {
     console.log("createOrReplaceContainer", {spec});
     const name = containerName(spec.serverId);
     console.log("createOrReplaceContainer", {name});
@@ -98,11 +128,24 @@ export async function createOrReplaceContainer(spec: ServerSpec) {
     return { containerId: container.id, name, volume: vol };
 }
 
-function isNotFound(err: any) {
+/**
+ * Checks if the provided error object corresponds to a "not found" condition.
+ *
+ * @param {any} err - The error object to evaluate.
+ * @return {boolean} Returns `true` if the error indicates a "not found" status (HTTP 404)
+ *                   or matches the "no such container" message pattern, otherwise `false`.
+ */
+function isNotFound(err: any): boolean {
     return err?.statusCode === 404 || /no such container/i.test(String(err?.message ?? ""));
 }
 
-export async function containerExists(serverId: string) {
+/**
+ * Checks if a Docker container with the specified server ID exists.
+ *
+ * @param {string} serverId - The unique identifier of the server.
+ * @return {Promise<boolean>} A promise that resolves to `true` if the container exists, or `false` if it does not exist. Throws an error for unexpected issues.
+ */
+export async function containerExists(serverId: string): Promise<boolean> {
     const name = containerName(serverId);
     try {
         await docker.getContainer(name).inspect();
@@ -113,7 +156,21 @@ export async function containerExists(serverId: string) {
     }
 }
 
-export async function containerStatus(serverId: string) {
+/**
+ * Fetches the status of a Docker container based on the provided server ID.
+ *
+ * @param {string} serverId - A unique identifier for the server whose container status is requested.
+ * @return {Promise<Object>} A promise that resolves to an object containing the container's status information:
+ *   - `exists` (boolean): Indicates if the container exists.
+ *   - `status` (string): The current status of the container (e.g., running, exited, created).
+ *   - `running` (boolean): Indicates if the container is currently running.
+ *   - `startedAt` (string|null): The timestamp when the container was started, or null if not applicable.
+ *   - `finishedAt` (string|null): The timestamp when the container finished, or null if not applicable.
+ *   - `exitCode` (number|null): The exit code of the container process, or null if not applicable.
+ *   - `error` (string|null): Any error associated with the container, or null if none exists.
+ * If the container does not exist, the returned object will only contain `exists: false`.
+ */
+export async function containerStatus(serverId: string): Promise<object> {
     const name = containerName(serverId);
     const c = docker.getContainer(name);
 
@@ -134,19 +191,38 @@ export async function containerStatus(serverId: string) {
     }
 }
 
-export async function restartContainer(serverId: string) {
+/**
+ * Restarts a Docker container associated with the specified server ID.
+ *
+ * @param {string} serverId - The unique identifier for the server whose container must be restarted.
+ * @return {Promise<void>} A promise that resolves when the container has been successfully restarted.
+ */
+export async function restartContainer(serverId: string): Promise<void> {
     const name = containerName(serverId);
     const c = docker.getContainer(name);
     await c.restart({ t: 10 });
 }
 
-export async function startContainer(serverId: string) {
+/**
+ * Starts a Docker container with the specified server ID.
+ *
+ * @param {string} serverId - The unique identifier of the server whose container needs to be started.
+ * @return {Promise<void>} A promise that resolves when the container has successfully started.
+ */
+export async function startContainer(serverId: string): Promise<void> {
     const name = containerName(serverId);
     const c = docker.getContainer(name);
     await c.start();
 }
 
-export async function stopContainer(serverId: string) {
+/**
+ * Stops a running Docker container identified by the specified server ID. If the container is already stopped,
+ * paused, or not running, the method tolerates the error and does not throw.
+ *
+ * @param {string} serverId - The unique identifier of the server whose container needs to be stopped.
+ * @return {Promise<void>} A promise that resolves once the container has been stopped or if it was already not running.
+ */
+export async function stopContainer(serverId: string): Promise<void> {
     const name = containerName(serverId);
     const c = docker.getContainer(name);
 
@@ -162,14 +238,27 @@ export async function stopContainer(serverId: string) {
     }
 }
 
-export async function deleteContainer(serverId: string) {
+/**
+ * Deletes a Docker container associated with the specified server ID.
+ *
+ * @param {string} serverId - The unique identifier for the server whose container is to be deleted.
+ * @return {Promise<void>} A promise that resolves when the container is successfully deleted.
+ */
+export async function deleteContainer(serverId: string): Promise<void> {
     const name = containerName(serverId);
     const c = docker.getContainer(name);
     try { await c.stop({ t: 5 }); } catch {}
     await c.remove({ force: true });
 }
 
-export async function tailLogs(serverId: string, tail = 200) {
+/**
+ * Fetches and returns logs from a specific Docker container.
+ *
+ * @param {string} serverId - The identifier for the server whose logs are to be fetched.
+ * @param {number} [tail=200] - The number of log lines to retrieve from the end. Defaults to 200 if not specified.
+ * @return {Promise<string>} A promise that resolves to a string containing the logs of the specified container.
+ */
+export async function tailLogs(serverId: string, tail: number = 200): Promise<string> {
     const name = containerName(serverId);
     const c = docker.getContainer(name);
 

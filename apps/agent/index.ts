@@ -47,6 +47,16 @@ const agentVersion = process.env.AGENT_VERSION ?? "0.1.0";
 const dataDir = path.join(process.cwd(), "data");
 const identityPath = path.join(dataDir, "identity.json");
 
+/**
+ * Loads the agent identity from a specified file path.
+ *
+ * The identity is expected to be stored in JSON format. If the file exists and contains
+ * the necessary properties (`nodeId` and `sharedSecret`), the parsed object is returned.
+ * If the file is missing, unreadable, or does not contain the expected properties,
+ * the method returns `null`.
+ *
+ * @return {AgentIdentity | null} The loaded agent identity object if valid, or `null` if invalid or not found.
+ */
 function loadIdentity(): AgentIdentity | null {
     try {
         const raw = fs.readFileSync(identityPath, "utf-8");
@@ -58,12 +68,27 @@ function loadIdentity(): AgentIdentity | null {
     }
 }
 
-function saveIdentity(id: AgentIdentity) {
+/**
+ * Saves the given agent identity to a predefined data directory.
+ * The method ensures that the data directory exists and writes
+ * the identity information as a JSON file.
+ *
+ * @param {AgentIdentity} id - The agent identity object to be saved.
+ * @return {void} This method does not return a value.
+ */
+function saveIdentity(id: AgentIdentity): void {
     fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(identityPath, JSON.stringify(id, null, 2), "utf-8");
 }
 
-async function enrollIfNeeded(app: FastifyInstance) {
+/**
+ * Enrolls the application if no existing identity is found. If an identity exists, skips the enrollment process.
+ *
+ * @param {FastifyInstance} app - The Fastify application instance, used for logging and application context.
+ * @return {Promise<Object>} A Promise resolving to the existing or newly enrolled identity object.
+ * @throws {Error} If the ENROLL_TOKEN is missing or the enrollment process fails.
+ */
+async function enrollIfNeeded(app: FastifyInstance): Promise<object> {
     const existing = loadIdentity();
     if (existing) {
         app.log.info({ nodeId: existing.nodeId }, "Identity already present, skip enrollment.");
@@ -108,15 +133,38 @@ async function enrollIfNeeded(app: FastifyInstance) {
     app.log.info({ nodeId: parsed.nodeId }, "Enrollment successful, identity saved.");
     return parsed;
 }
-function sleep(ms: number) {
+
+/**
+ * Pauses the execution of code for a specified number of milliseconds.
+ *
+ * @param {number} ms - The number of milliseconds to pause execution.
+ * @return {Promise<void>} A promise that resolves after the specified delay.
+ */
+function sleep(ms: number): Promise<void> {
     return new Promise((r) => setTimeout(r, ms));
 }
 
-function safeSend(ws: any, msg: string) {
+/**
+ * Safely sends a message through a WebSocket. Ensures that any errors
+ * that occur during the send operation are caught and do not disrupt execution.
+ *
+ * @param {any} ws - The WebSocket instance to send the message through.
+ * @param {string} msg - The message to be sent via the WebSocket.
+ * @return {void} - This method does not return a value.
+ */
+function safeSend(ws: any, msg: string): void {
     try { ws.send(msg); } catch {}
 }
 
-function parseServerId(req: any) {
+/**
+ * Extracts and returns the server ID from the given request object. The method
+ * attempts to retrieve the ID first from the request parameters, and if not found,
+ * parses it from the request URL.
+ *
+ * @param {Object} req - The request object containing parameters and raw URL data.
+ * @return {string|null} The extracted server ID as a string if found, otherwise null.
+ */
+function parseServerId(req: any): string | null {
     const fromParams = (req.params as any)?.id;
     if (fromParams) return String(fromParams);
 
@@ -126,7 +174,16 @@ function parseServerId(req: any) {
     return m?.[1] ?? null;
 }
 
-function parseTail(rawUrl: string, defaultTail = 100) {
+/**
+ * Parses the "tail" parameter from a given URL string and returns its value
+ * as a finite integer within a valid range. If the parameter is not present,
+ * invalid, or out of range, the default value is returned.
+ *
+ * @param {string} rawUrl - The URL string to parse for the "tail" parameter.
+ * @param {number} [defaultTail=100] - The default value to return if the "tail" parameter is invalid or not specified.
+ * @return {number} The parsed "tail" value as an integer within the range 0-5000, or the default value if validation fails.
+ */
+function parseTail(rawUrl: string, defaultTail: number = 100): number {
     try {
         const u = new URL(rawUrl, "http://localhost");
         const t = u.searchParams.get("tail");
@@ -135,7 +192,17 @@ function parseTail(rawUrl: string, defaultTail = 100) {
     } catch {}
     return defaultTail;
 }
-async function bootstrap(){
+
+
+/**
+ * Initializes and configures a Fastify application with a logger, error handler,
+ * WebSocket support, and various routes for different functionalities, including
+ * health checks, authentication tests, server logs, and console streaming.
+ *
+ * @return {Promise<void>} A promise that resolves once the Fastify application
+ * is successfully initialized with all hooks, routes, and services registered.
+ */
+async function bootstrap(): Promise<void> {
     const app = Fastify(
         {
             logger: {
@@ -224,21 +291,16 @@ async function bootstrap(){
         let closed = false;
         let activeStream: any = null;
 
-        // Cursor: "since" in Sekunden (unix seconds)
         let lastSinceSec: number | null = null;
 
-        // Wenn du die timestamps NICHT im Frontend sehen willst:
         const stripTimestamps = true;
 
         function updateSinceFromText(text: string) {
-            // Docker timestamps: 2026-01-02T14:01:25.123456789Z <msg>
             const lines = text.replace(/\r/g, "").split("\n");
             for (const ln of lines) {
                 const space = ln.indexOf(" ");
                 if (space <= 0) continue;
                 const ts = ln.slice(0, space);
-                // Date.parse versteht oft auch mit Nano-Sekunden nicht sauber -> wir trimmen ggf.
-                // z.B. 2026-01-02T14:01:25.123456789Z -> 2026-01-02T14:01:25.123Z
                 const cleaned = ts.replace(/\.(\d{3})\d+Z$/, ".$1Z");
                 const ms = Date.parse(cleaned);
                 if (!Number.isNaN(ms)) lastSinceSec = Math.floor(ms / 1000);
@@ -247,7 +309,6 @@ async function bootstrap(){
 
         function maybeStripTimestamps(text: string) {
             if (!stripTimestamps) return text;
-            // Entfernt führenden ISO Timestamp + Space pro Zeile
             return text.replace(/^\d{4}-\d{2}-\d{2}T[^\s]+\s/gm, "");
         }
 

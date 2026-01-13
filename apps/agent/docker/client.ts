@@ -1,6 +1,15 @@
 import Docker from "dockerode";
 
-export function createDockerClient() {
+/**
+ * Creates and returns a Docker client instance. The function checks for the presence of
+ * an environment variable `DOCKER_HOST` to determine the Docker host configuration. If
+ * `DOCKER_HOST` is defined, it parses the value to configure the client with the specified
+ * host and port. If not provided, the client is created using the default settings or
+ * auto-detected socket paths/platform-specific defaults.
+ *
+ * @return {Docker} A Docker client instance configured based on the environment or default settings.
+ */
+export function createDockerClient(): Docker {
     // Standard:
     // - Linux/WSL: socketPath /var/run/docker.sock
     // - Windows Docker Desktop: dockerode kann oft default nutzen.
