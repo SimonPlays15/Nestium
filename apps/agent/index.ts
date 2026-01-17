@@ -24,16 +24,16 @@ config();
 
 // Random UUID v4 generator
 // @ts-ignore
-const uuidv4 = () => ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+const uuidv4 = () => ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
 
 const RegisterResponseSchema = z.object({
-  nodeId: z.string(),
-  sharedSecret: z.string(),
+    nodeId: z.string(),
+    sharedSecret: z.string(),
 });
 
 type AgentIdentity = {
-  nodeId: string;
-  sharedSecret: string;
+    nodeId: string;
+    sharedSecret: string;
 };
 
 const port = Number(process.env.AGENT_PORT ?? "8081");
@@ -77,7 +77,7 @@ function loadIdentity(): AgentIdentity | null {
  * @return {void} This method does not return a value.
  */
 function saveIdentity(id: AgentIdentity): void {
-    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(dataDir, {recursive: true});
     fs.writeFileSync(identityPath, JSON.stringify(id, null, 2), "utf-8");
 }
 
@@ -91,7 +91,7 @@ function saveIdentity(id: AgentIdentity): void {
 async function enrollIfNeeded(app: FastifyInstance): Promise<object> {
     const existing = loadIdentity();
     if (existing) {
-        app.log.info({ nodeId: existing.nodeId }, "Identity already present, skip enrollment.");
+        app.log.info({nodeId: existing.nodeId}, "Identity already present, skip enrollment.");
         return existing;
     }
 
@@ -101,13 +101,13 @@ async function enrollIfNeeded(app: FastifyInstance): Promise<object> {
     }
 
     app.log.info(
-        { panelUrl, nodeName, endpointUrl, agentVersion },
+        {panelUrl, nodeName, endpointUrl, agentVersion},
         "No identity found, enrolling with panel..."
     );
 
     const res = await fetch(`${panelUrl}/nodes/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
             token: enrollToken,
             name: nodeName,
@@ -130,7 +130,7 @@ async function enrollIfNeeded(app: FastifyInstance): Promise<object> {
     const parsed = RegisterResponseSchema.parse(json);
 
     saveIdentity(parsed);
-    app.log.info({ nodeId: parsed.nodeId }, "Enrollment successful, identity saved.");
+    app.log.info({nodeId: parsed.nodeId}, "Enrollment successful, identity saved.");
     return parsed;
 }
 
@@ -153,7 +153,10 @@ function sleep(ms: number): Promise<void> {
  * @return {void} - This method does not return a value.
  */
 function safeSend(ws: any, msg: string): void {
-    try { ws.send(msg); } catch {}
+    try {
+        ws.send(msg);
+    } catch {
+    }
 }
 
 /**
@@ -189,7 +192,8 @@ function parseTail(rawUrl: string, defaultTail: number = 100): number {
         const t = u.searchParams.get("tail");
         const n = t ? Number(t) : defaultTail;
         if (Number.isFinite(n) && n >= 0 && n <= 5000) return Math.floor(n);
-    } catch {}
+    } catch {
+    }
     return defaultTail;
 }
 
@@ -208,7 +212,7 @@ async function bootstrap(): Promise<void> {
             logger: {
                 name: nodeName,
                 serializers: {
-                    req (req){
+                    req(req) {
                         return {
                             method: req.raw.method,
                             url: req.raw.url,
@@ -225,10 +229,11 @@ async function bootstrap(): Promise<void> {
                     },
                     level: "debug"
                 },
-            }, trustProxy: true, });
+            }, trustProxy: true,
+        });
 
     app.setErrorHandler((err, req, reply) => {
-        if(err) {
+        if (err) {
             app.log.error(err, `An error accurred: ${err}`)
             reply.status(500).send({error: "Internal server error", theError: err});
         } else
@@ -257,13 +262,19 @@ async function bootstrap(): Promise<void> {
 
 // Tests
     app.post("/v1/auth-test", async (req) => {
-        return { ok: true, received: req.body ?? null };
+        return {ok: true, received: req.body ?? null};
     });
-    app.get("/ws-test", { websocket: true }, (conn: any, req: any) => {
-        const ws = conn?.socket ?? conn; // ✅ unterstützt beide Signaturen
+    app.get("/ws-test", {websocket: true}, (conn: any, req: any) => {
+        const ws = conn?.socket ?? conn;
         ws.send("ok");
-        try{ ws.close();} catch {}
-        try{ ws.destroy();} catch {}
+        try {
+            ws.close();
+        } catch {
+        }
+        try {
+            ws.destroy();
+        } catch {
+        }
     });
 
     /**
@@ -272,7 +283,7 @@ async function bootstrap(): Promise<void> {
     const docker = createDockerClient();
 
     // logs
-    app.get("/v1/servers/:id/logs/stream", { websocket: true }, (connection, req) => {
+    app.get("/v1/servers/:id/logs/stream", {websocket: true}, (connection, req) => {
         const ws: any = (connection as any)?.socket ?? (connection as any);
 
         const rawUrl = String(req.raw?.url ?? "");
@@ -281,7 +292,10 @@ async function bootstrap(): Promise<void> {
 
         if (!serverId) {
             safeSend(ws, "ERROR: serverId not found\n");
-            try { ws.close?.(); } catch {}
+            try {
+                ws.close?.();
+            } catch {
+            }
             return;
         }
 
@@ -309,15 +323,24 @@ async function bootstrap(): Promise<void> {
 
         function maybeStripTimestamps(text: string) {
             if (!stripTimestamps) return text;
-            return text.replace(/^\d{4}-\d{2}-\d{2}T[^\s]+\s/gm, "");
+            return text.replace(/^\d{4}-\d{2}-\d{2}T\S+\s/gm, "");
         }
 
         const closeAll = () => {
             if (closed) return;
             closed = true;
-            try { activeStream?.destroy?.(); } catch {}
-            try { ws.terminate?.(); } catch {}
-            try { ws.close?.(); } catch {}
+            try {
+                activeStream?.destroy?.();
+            } catch {
+            }
+            try {
+                ws.terminate?.();
+            } catch {
+            }
+            try {
+                ws.close?.();
+            } catch {
+            }
         };
 
         ws.on("close", closeAll);
@@ -358,7 +381,10 @@ async function bootstrap(): Promise<void> {
                     const armInactivity = () => {
                         if (inactivityTimer) clearTimeout(inactivityTimer);
                         inactivityTimer = setTimeout(() => {
-                            try { (stream as any)?.destroy?.(); } catch {}
+                            try {
+                                (stream as any)?.destroy?.();
+                            } catch {
+                            }
                             resolve();
                         }, 20_000);
                     };
@@ -415,12 +441,12 @@ async function bootstrap(): Promise<void> {
         async (req) => {
             const tail = req.query.tail ? Number(req.query.tail) : 200;
             const text = await tailLogs(req.params.id, Number.isFinite(tail) ? tail : 200);
-            return { ok: true, logs: text };
+            return {ok: true, logs: text};
         }
     );
 
     // commands
-    app.get("/v1/servers/:id/console/stream", { websocket: true }, async (connection, req) => {
+    app.get("/v1/servers/:id/console/stream", {websocket: true}, async (connection, req) => {
         const ws: any = (connection as any)?.socket ?? (connection as any);
 
         const serverId = (req.params as any)?.id ?? (() => {
@@ -432,7 +458,10 @@ async function bootstrap(): Promise<void> {
 
         if (!serverId) {
             safeSend(ws, "ERROR: serverId not found\n");
-            try { ws.close?.(); } catch {}
+            try {
+                ws.close?.();
+            } catch {
+            }
             return;
         }
 
@@ -441,7 +470,10 @@ async function bootstrap(): Promise<void> {
         const info = await container.inspect().catch(() => null);
         if (!info) {
             safeSend(ws, `ERROR: container not found: ${name}\n`);
-            try { ws.close?.(); } catch {}
+            try {
+                ws.close?.();
+            } catch {
+            }
             return;
         }
 
@@ -453,7 +485,10 @@ async function bootstrap(): Promise<void> {
 
         if (!open) {
             safeSend(ws, `ERROR: Container was created with OpenStdin=false. Enable stdin_open/OpenStdin.\n`);
-            try { ws.close?.(); } catch {}
+            try {
+                ws.close?.();
+            } catch {
+            }
             return;
         }
         let closed = false;
@@ -463,9 +498,18 @@ async function bootstrap(): Promise<void> {
         const closeAll = () => {
             if (closed) return;
             closed = true;
-            try { stdinStream?.destroy?.(); } catch {}
-            try { ws.terminate?.(); } catch {}
-            try { ws.close?.(); } catch {}
+            try {
+                stdinStream?.destroy?.();
+            } catch {
+            }
+            try {
+                ws.terminate?.();
+            } catch {
+            }
+            try {
+                ws.close?.();
+            } catch {
+            }
         };
 
         ws.on("close", closeAll);
@@ -475,7 +519,10 @@ async function bootstrap(): Promise<void> {
             if (closed || attaching) return;
             attaching = true;
 
-            try { stdinStream?.destroy?.(); } catch {}
+            try {
+                stdinStream?.destroy?.();
+            } catch {
+            }
             stdinStream = null;
 
             try {
@@ -555,7 +602,10 @@ async function bootstrap(): Promise<void> {
             } catch (e: any) {
                 safeSend(ws, `ERROR: write failed: ${String(e?.message ?? e)}\n`);
                 // try reattach next time
-                try { stdinStream?.destroy?.(); } catch {}
+                try {
+                    stdinStream?.destroy?.();
+                } catch {
+                }
                 stdinStream = null;
             }
         });
@@ -568,50 +618,49 @@ async function bootstrap(): Promise<void> {
         "/v1/servers/:id/create",
         async (req) => {
             const serverId = req.params.id;
-            const spec: ServerSpec = { serverId, ...req.body };
+            const spec: ServerSpec = {serverId, ...req.body};
             const result = await createOrReplaceContainer(spec);
-            return { ok: true, ...result };
+            return {ok: true, ...result};
         }
     );
-
     /**
      * Server lifecycle management.
-     */
+     * */
 
     app.get<{ Params: { id: string } }>("/v1/servers/:id/exists", async (req) => {
         const exists = await containerExists(req.params.id);
-        return { ok: true, exists };
+        return {ok: true, exists};
     });
 
     app.get<{ Params: { id: string } }>("/v1/servers/:id/status", async (req) => {
         const status = await containerStatus(req.params.id);
-        return { ok: true, ...status };
+        return {ok: true, ...status};
     });
 
     app.post<{ Params: { id: string } }>("/v1/servers/:id/start", async (req) => {
         await startContainer(req.params.id);
-        return { ok: true };
+        return {ok: true};
     });
 
     app.post<{ Params: { id: string } }>("/v1/servers/:id/stop", async (req) => {
         await stopContainer(req.params.id);
-        return { ok: true };
+        return {ok: true};
     });
 
     app.post<{ Params: { id: string } }>("/v1/servers/:id/restart", async (req) => {
         await restartContainer(req.params.id);
-        return { ok: true };
+        return {ok: true};
     });
 
     app.delete<{ Params: { id: string } }>("/v1/servers/:id", async (req) => {
         await deleteContainer(req.params.id);
-        return { ok: true };
+        return {ok: true};
     });
 
     // Starting Fastify Endpoint
     await enrollIfNeeded(app);
 
-    await app.listen({ port, host: "0.0.0.0" });
+    await app.listen({port, host: "0.0.0.0"});
     app.log.info(`Agent listening on ${endpointUrl}`);
     app.log.info(`Panel URL: ${panelUrl}`);
     app.log.info(`Node name: ${nodeName}`);
@@ -620,6 +669,6 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((err) => {
-  console.error(err, "Agent failed to start");
-  process.exit(1);
+    console.error(err, "Agent failed to start");
+    process.exit(1);
 });

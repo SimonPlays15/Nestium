@@ -7,7 +7,7 @@ import crypto from 'crypto';
  * @return {string} The hexadecimal representation of the SHA-256 hash of the input.
  */
 function sha256Hex(input: string) {
-  return crypto.createHash('sha256').update(input).digest('hex');
+    return crypto.createHash('sha256').update(input).digest('hex');
 }
 
 /**
@@ -19,7 +19,7 @@ function sha256Hex(input: string) {
  * @return {string} The hexadecimal representation of the HMAC-SHA256 hash.
  */
 function hmacSha256Hex(secret: string, data: string) {
-  return crypto.createHmac('sha256', secret).update(data).digest('hex');
+    return crypto.createHmac('sha256', secret).update(data).digest('hex');
 }
 
 /**
@@ -34,27 +34,32 @@ function hmacSha256Hex(secret: string, data: string) {
  * @return {Object} Signed headers object including `X-Node-Id`, `X-Timestamp`, `X-Body-SHA256`, and `X-Signature`.
  */
 export function agentSignedHeaders(opts: {
-  nodeId: string;
-  sharedSecret: string;
-  method: string; // "GET"
-  path: string; // "/v1/servers/:id/logs/stream"
-  bodyStr?: string; // bei WS: ""
-}): object {
-  const method = opts.method.toUpperCase();
-  const ts = Date.now().toString();
-  const bodyStr = opts.bodyStr ?? '';
-  const bodyHash = sha256Hex(bodyStr);
-  const pathOnly = opts.path.split('?')[0];
+    nodeId: string;
+    sharedSecret: string;
+    method: string; // "GET"
+    path: string; // "/v1/servers/:id/logs/stream"
+    bodyStr?: string; // bei WS: ""
+}): {
+    'X-Node-Id': string;
+    'X-Timestamp': string;
+    'X-Body-SHA256': string;
+    'X-Signature': string;
+} {
+    const method = opts.method.toUpperCase();
+    const ts = Date.now().toString();
+    const bodyStr = opts.bodyStr ?? '';
+    const bodyHash = sha256Hex(bodyStr);
+    const pathOnly = opts.path.split('?')[0];
 
-  const signingString = `${ts}.${method}.${pathOnly}.${bodyHash}`;
-  const sig = hmacSha256Hex(opts.sharedSecret, signingString);
+    const signingString = `${ts}.${method}.${pathOnly}.${bodyHash}`;
+    const sig = hmacSha256Hex(opts.sharedSecret, signingString);
 
-  return {
-    'X-Node-Id': opts.nodeId,
-    'X-Timestamp': ts,
-    'X-Body-SHA256': bodyHash,
-    'X-Signature': sig,
-  };
+    return {
+        'X-Node-Id': opts.nodeId,
+        'X-Timestamp': ts,
+        'X-Body-SHA256': bodyHash,
+        'X-Signature': sig,
+    };
 }
 
 /**
@@ -72,38 +77,38 @@ export function agentSignedHeaders(opts: {
  * @return {Promise<Response>} A promise that resolves to the Response object from the fetch call.
  */
 export async function agentFetch(opts: {
-  nodeId: string;
-  sharedSecret: string;
-  endpointUrl: string; // e.g. http://localhost:8081
-  path: string; // e.g. /v1/test
-  method?: string; // GET/POST...
-  body?: unknown; // object -> JSON
+    nodeId: string;
+    sharedSecret: string;
+    endpointUrl: string; // e.g. http://localhost:8081
+    path: string; // e.g. /v1/test
+    method?: string; // GET/POST...
+    body?: unknown; // object -> JSON
 }): Promise<Response> {
-  const method = (opts.method ?? 'GET').toUpperCase();
-  const ts = Date.now().toString();
+    const method = (opts.method ?? 'GET').toUpperCase();
+    const ts = Date.now().toString();
 
-  const bodyStr =
-    opts.body === undefined || opts.body === null
-      ? ''
-      : typeof opts.body === 'string'
-        ? opts.body
-        : JSON.stringify(opts.body);
+    const bodyStr =
+        opts.body === undefined || opts.body === null
+            ? ''
+            : typeof opts.body === 'string'
+                ? opts.body
+                : JSON.stringify(opts.body);
 
-  const bodyHash = sha256Hex(bodyStr);
-  const pathOnly = opts.path.split('?')[0];
+    const bodyHash = sha256Hex(bodyStr);
+    const pathOnly = opts.path.split('?')[0];
 
-  const signingString = `${ts}.${method}.${pathOnly}.${bodyHash}`;
-  const sig = hmacSha256Hex(opts.sharedSecret, signingString);
+    const signingString = `${ts}.${method}.${pathOnly}.${bodyHash}`;
+    const sig = hmacSha256Hex(opts.sharedSecret, signingString);
 
-  return await fetch(`${opts.endpointUrl}${opts.path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Node-Id': opts.nodeId,
-      'X-Timestamp': ts,
-      'X-Body-SHA256': bodyHash,
-      'X-Signature': sig,
-    },
-    body: method === 'GET' || method === 'HEAD' ? undefined : bodyStr,
-  });
+    return await fetch(`${opts.endpointUrl}${opts.path}`, {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Node-Id': opts.nodeId,
+            'X-Timestamp': ts,
+            'X-Body-SHA256': bodyHash,
+            'X-Signature': sig,
+        },
+        body: method === 'GET' || method === 'HEAD' ? undefined : bodyStr,
+    });
 }
