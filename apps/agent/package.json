@@ -20,7 +20,7 @@
     "@nestium/shared": "file:../../packages/shared",
     "dockerode": "^4.0.9",
     "dotenv": "^17.2.3",
-    "fastify": "^5.6.2",
+    "fastify": "5.7.3",
     "zod": "^4.2.1"
   },
   "devDependencies": {

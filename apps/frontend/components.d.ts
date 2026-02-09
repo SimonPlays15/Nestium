@@ -11,8 +11,11 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    ConsolePanel: typeof import('./src/components/server/ConsolePanel.vue')['default']
+    Console: typeof import('./src/components/server/Console.vue')['default']
+    Dashboard: typeof import('./src/components/dashboard/Dashboard.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ServerCard: typeof import('./src/components/dashboard/ServerCard.vue')['default']
+    TestConsoleView: typeof import('./src/view/server/TestConsoleView.vue')['default']
   }
 }

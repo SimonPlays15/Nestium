@@ -732,46 +732,488 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<style scoped>
-
-</style>
-
 <template>
-  <div class="container-fluid mt-2">
-    <div v-if="lastError" class="alert alert-danger alert-dismissible">
-      <strong>Error</strong> {{ lastError }}
+  <div class="console-container">
+    <!-- Error Alert -->
+    <div v-if="lastError" class="error-alert">
+      <div class="error-content">
+        <i class="pi pi-exclamation-triangle"></i>
+        <div>
+          <strong>Connection Error</strong>
+          <p>{{ lastError }}</p>
+        </div>
+      </div>
+      <button class="error-close" @click="lastError = null">
+        <i class="pi pi-times"></i>
+      </button>
     </div>
 
-    <div style="display: flex; flex-direction: column; gap: 10px; height: 100%">
-      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px">
-        <div style="display: flex; align-items: center; gap: 10px">
-          <strong>Console</strong>
-
-          <span
-            style="font-size: 12px; padding: 2px 8px; border: 1px solid #ccc; border-radius: 999px">
-            {{ badgeText() }}
-          </span>
-
-          <span style="font-size: 12px; opacity: 0.7">
-            {{ connText() }}
-          </span>
+    <!-- Console Panel -->
+    <div class="console-panel">
+      <!-- Header -->
+      <div class="console-header">
+        <div class="header-left">
+          <div class="header-title">
+            <i class="pi pi-terminal"></i>
+            <h2>Server Console</h2>
+          </div>
+          
+          <!-- Status Badge -->
+          <div class="status-badge" :class="`status-${state}`">
+            <span class="status-indicator"></span>
+            <span class="status-text">{{ badgeText() }}</span>
+          </div>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 10px">
-          <label style="font-size: 12px; display: flex; gap: 6px; align-items: center">
-            <input v-model="autoscroll" type="checkbox"/>
-            autoscroll
-          </label>
-
-          <button style="font-size: 12px" @click="clearTerminal">clear</button>
+        <div class="header-right">
+          <!-- Connection Info -->
+          <div class="connection-info">
+            <div class="info-item" :class="{ connected: wsConnected }">
+              <i class="pi pi-circle-fill"></i>
+              <span>WebSocket</span>
+            </div>
+            <div class="info-item" :class="{ connected: agent.console === 'connected' }">
+              <i class="pi pi-circle-fill"></i>
+              <span>Console</span>
+            </div>
+            <div class="info-item" :class="{ connected: agent.logs === 'connected' }">
+              <i class="pi pi-circle-fill"></i>
+              <span>Logs</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- xterm container -->
-      <div
-        ref="termEl"
-        style="flex: 1; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; min-height: 320px; "
-      />
+      <!-- Terminal Container -->
+      <div class="terminal-wrapper">
+        <div ref="termEl" class="terminal-container"></div>
+      </div>
+
+      <!-- Footer Controls -->
+      <div class="console-footer">
+        <div class="footer-left">
+          <label class="checkbox-control">
+            <input v-model="autoscroll" type="checkbox" />
+            <i :class="autoscroll ? 'pi pi-check-square' : 'pi pi-square'"></i>
+            <span>Auto-scroll</span>
+          </label>
+        </div>
+
+        <div class="footer-right">
+          <button class="control-button" @click="clearTerminal" title="Clear console">
+            <i class="pi pi-trash"></i>
+            <span>Clear</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Container */
+.console-container {
+  width: 100%;
+  height: 100vh;
+  background: #0f1419;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Error Alert */
+.error-alert {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  border: 1px solid #b91c1c;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.error-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: white;
+}
+
+.error-content i {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.error-content strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.error-content p {
+  margin: 0;
+  font-size: 0.875rem;
+  opacity: 0.95;
+}
+
+.error-close {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 0.5rem;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.error-close:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Console Panel */
+.console-panel {
+  flex: 1;
+  background: #1a1f2e;
+  border: 1px solid #2d3748;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Header */
+.console-header {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-bottom: 1px solid #2d3748;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-title i {
+  font-size: 1.5rem;
+  color: #60a5fa;
+}
+
+.header-title h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+/* Status Badge */
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-badge.status-running {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.status-badge.status-running .status-indicator {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.status-badge.status-starting {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.status-badge.status-starting .status-indicator {
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+}
+
+.status-badge.status-stopped {
+  background: rgba(107, 114, 128, 0.15);
+  border-color: #6b7280;
+  color: #9ca3af;
+}
+
+.status-badge.status-stopped .status-indicator {
+  background: #6b7280;
+}
+
+.status-badge.status-crashed {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.status-badge.status-crashed .status-indicator {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.status-badge.status-unknown {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+
+.status-badge.status-unknown .status-indicator {
+  background: #fbbf24;
+}
+
+/* Header Right */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.connection-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #2d3748;
+  border-radius: 6px;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #64748b;
+  transition: color 0.3s ease;
+}
+
+.info-item i {
+  font-size: 0.5rem;
+}
+
+.info-item.connected {
+  color: #22c55e;
+}
+
+.info-item.connected i {
+  animation: blink 2s infinite;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Terminal Wrapper */
+.terminal-wrapper {
+  flex: 1;
+  background: #0a0e1a;
+  padding: 1rem;
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Footer */
+.console-footer {
+  background: #1e293b;
+  border-top: 1px solid #2d3748;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.footer-left,
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Checkbox Control */
+.checkbox-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+  color: #cbd5e1;
+  font-size: 0.875rem;
+  transition: color 0.2s ease;
+}
+
+.checkbox-control:hover {
+  color: #f1f5f9;
+}
+
+.checkbox-control input[type="checkbox"] {
+  display: none;
+}
+
+.checkbox-control i {
+  font-size: 1.125rem;
+  color: #60a5fa;
+  transition: transform 0.2s ease;
+}
+
+.checkbox-control:hover i {
+  transform: scale(1.1);
+}
+
+/* Control Button */
+.control-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.125rem;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: 1px solid #1d4ed8;
+  border-radius: 6px;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.control-button:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.control-button:active {
+  transform: translateY(0);
+}
+
+.control-button i {
+  font-size: 1rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .console-container {
+    padding: 1rem;
+  }
+
+  .console-header {
+    padding: 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-left,
+  .header-right {
+    width: 100%;
+  }
+
+  .connection-info {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .console-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .footer-left,
+  .footer-right {
+    width: 100%;
+  }
+
+  .control-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-title h2 {
+    font-size: 1.125rem;
+  }
+
+  .status-badge {
+    font-size: 0.75rem;
+    padding: 0.375rem 0.75rem;
+  }
+
+  .connection-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+}
+</style>

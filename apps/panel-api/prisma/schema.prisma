@@ -85,6 +85,53 @@ model Allocation {
   @@index([nodeId, assignedServerId])
 }
 
+model Nests {
+  id          String   @id @default(uuid())
+  author      String
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  eggs        Eggs[]
+}
+
+model Eggs {
+  id              String         @id @default(uuid())
+  nestId          Nests          @relation(fields: [nestsId], references: [id])
+  name            String
+  author          String
+  description     String?
+  features        Json?
+  dockerImages    Json
+  updateUrl       String         @default("")
+  configFiles     Json
+  configStartup   Json
+  configLogs      Json
+  configStop      Json
+  startup         String
+  scriptContainer String
+  scriptEntry     String         @default("/bin/bash")
+  installScript   String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  nestsId         String
+  eggVariables    EggVariables[]
+}
+
+model EggVariables {
+  id           String   @id @default(uuid())
+  name         String
+  description  String
+  envVariable  String
+  defaultValue String
+  userCanView  Boolean  @default(true)
+  userCanEdit  Boolean  @default(true)
+  rules        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  eggs         Eggs?    @relation(fields: [eggsId], references: [id])
+  eggsId       String?
+}
+
 model WsToken {
   id        String   @id @default(uuid())
   tokenHash String   @unique
