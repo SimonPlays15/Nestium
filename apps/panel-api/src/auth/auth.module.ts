@@ -5,6 +5,8 @@ import {AuthService} from './auth.service';
 import {AuthController} from './auth.controller';
 import {PrismaModule} from '../prisma/prisma.module';
 import {JwtStrategy} from './strategies/jwt.strategy';
+import {TokenBlacklistService} from './services/token-blacklist.service';
+import {TokenCleanupScheduler} from './schedules/token-cleanup.scheduler';
 import {StringValue} from "ms";
 
 
@@ -36,9 +38,9 @@ import {StringValue} from "ms";
             },
         }),
     ],
-    providers: [AuthService, JwtStrategy],
+    providers: [AuthService, JwtStrategy, TokenBlacklistService, TokenCleanupScheduler],
     controllers: [AuthController],
-    exports: [AuthService], // Export for use in other modules
+    exports: [AuthService, TokenBlacklistService], // Export for use in other modules
 })
 export class AuthModule {
 }

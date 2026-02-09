@@ -3,6 +3,7 @@ import {JwtService} from '@nestjs/jwt';
 import {PrismaService} from '../prisma/prisma.service';
 import {LoginDto} from './dto/login.dto';
 import {AuthResponseDto, UserResponseDto} from './dto/auth-response.dto';
+import {TokenBlacklistService} from './services/token-blacklist.service';
 import * as bcrypt from 'bcrypt';
 import {User} from '@prisma/client';
 
@@ -14,6 +15,7 @@ export class AuthService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly jwtService: JwtService,
+        private readonly blacklistService: TokenBlacklistService,
     ) {
     }
 
@@ -174,5 +176,18 @@ export class AuthService {
             permissions: user.permissions,
             createdAt: user.createdAt,
         };
+    }
+
+    /**
+     * Logout user by blacklisting their JWT token
+     *
+     * Adds the token to the blacklist, preventing future use.
+     * The token will remain blacklisted until its natural expiration.
+     *
+     * @param token - JWT token to blacklist
+     * @param userId - User ID who owns the token
+     */
+    async logout(token: string, userId: string): Promise<void> {
+        await this.blacklistService.addToBlacklist(token, userId);
     }
 }

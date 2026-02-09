@@ -1,4 +1,5 @@
-import {Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards,} from '@nestjs/common';
+import {BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Post, UseGuards,} from '@nestjs/common';
+import {SkipThrottle, Throttle} from '@nestjs/throttler';
 import {AuthService} from './auth.service';
 import {LoginDto} from './dto/login.dto';
 import {AuthResponseDto, UserResponseDto} from './dto/auth-response.dto';
@@ -9,7 +10,13 @@ import {Roles} from './decorators/roles.decorator';
 import {UserRole} from '@prisma/client';
 
 /**
- * Controller handling authentication endpoints
+ * Controller handling authentication endpoints with rate-limiting
+ *
+ * Rate limits:
+ * - Login: 5 requests per 60 seconds (strict - brute-force prevention)
+ * - Refresh: 10 requests per 60 seconds (moderate)
+ * - Me: 20 requests per 60 seconds (lenient - frequently used)
+ * - Logout: No limit (safe operation)
  */
 @Controller('auth')
 export class AuthController {
@@ -18,6 +25,8 @@ export class AuthController {
 
     /**
      * Login endpoint - authenticate user with email and password
+     *
+     * Rate-limited to 5 requests per 60 seconds to prevent brute-force attacks
      *
      * @param loginDto - Login credentials
      * @returns JWT token and user data
@@ -30,6 +39,7 @@ export class AuthController {
      * }
      */
     @Post('login')
+    @Throttle({default: {limit: 5, ttl: 60000}})
     @HttpCode(HttpStatus.OK)
     async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
         return this.authService.login(loginDto);
@@ -39,6 +49,7 @@ export class AuthController {
      * Get current authenticated user
      *
      * Protected by JWT Guard - requires valid Bearer token in Authorization header
+     * Rate-limited to 20 requests per 60 seconds (lenient - frequently used)
      *
      * @param user - Current authenticated user (extracted from JWT token)
      * @returns Current user data
@@ -49,27 +60,43 @@ export class AuthController {
      */
     @Get('me')
     @UseGuards(JwtAuthGuard)
+    @Throttle({default: {limit: 20, ttl: 60000}})
     async getCurrentUser(@CurrentUser() user: UserResponseDto): Promise<UserResponseDto> {
         return user;
     }
 
     /**
-     * Logout endpoint (optional - since JWT is stateless)
+     * Logout endpoint with token blacklisting
      *
-     * In production, you might want to implement token blacklisting.
-     * For now, logout is handled client-side by removing the token.
+     * Requires authentication. Blacklists the current JWT token,
+     * preventing it from being used for future requests.
+     * No rate-limiting applied as logout is a safe operation.
      *
+     * @param user - Current authenticated user
+     * @param authorization - Authorization header containing Bearer token
      * @returns Success message
      *
      * @example
      * POST /auth/logout
+     * Headers: { Authorization: "Bearer <your-jwt-token>" }
      */
     @Post('logout')
+    @UseGuards(JwtAuthGuard)
+    @SkipThrottle()
     @HttpCode(HttpStatus.OK)
-    async logout(): Promise<{ message: string }> {
-        // Since JWT is stateless, logout is handled client-side by removing the token
-        // You can implement token blacklisting here if needed
-        // TODO: Implement token blacklisting for production
+    async logout(
+        @CurrentUser() user: UserResponseDto,
+        @Headers('authorization') authorization?: string
+    ): Promise<{ message: string }> {
+        const token = authorization?.replace('Bearer ', '');
+
+        if (!token) {
+            throw new BadRequestException('No token provided');
+        }
+
+        // Blacklist the token
+        await this.authService.logout(token, user.id);
+
         return {message: 'Logged out successfully'};
     }
 
@@ -77,6 +104,7 @@ export class AuthController {
      * Refresh endpoint - validate token and return updated user data
      *
      * Use this endpoint to refresh user data (including permissions) without re-authentication
+     * Rate-limited to 10 requests per 60 seconds (moderate)
      *
      * @param user - Current authenticated user (from JWT token)
      * @returns Updated user data with current permissions
@@ -87,6 +115,7 @@ export class AuthController {
      */
     @Post('refresh')
     @UseGuards(JwtAuthGuard)
+    @Throttle({default: {limit: 10, ttl: 60000}})
     @HttpCode(HttpStatus.OK)
     async refresh(@CurrentUser() user: UserResponseDto): Promise<UserResponseDto> {
         // The token is already validated by JwtAuthGuard

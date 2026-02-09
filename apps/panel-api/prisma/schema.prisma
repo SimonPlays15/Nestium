@@ -143,6 +143,17 @@ model WsToken {
   @@index([serverId, userId])
 }
 
+model BlacklistedToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
 enum UserRole {
   ADMIN
   USER

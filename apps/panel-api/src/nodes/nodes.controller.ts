@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { NodesService } from './nodes.service';
 import { CreateEnrollmentDto } from './dto/create-enroll.dto';
 import { RegisterNodeDto } from './dto/register-node.dto';
@@ -14,6 +15,10 @@ import { Permission, UserRole } from '@prisma/client';
  * Controller responsible for handling operations related to nodes, including enrollment, health checks, and node management.
  *
  * Most endpoints require authentication and admin role or specific permissions.
+ *
+ * Rate limits:
+ * - Enroll: 5 requests per 60 seconds (admin only, strict)
+ * - Register: 3 requests per 60 seconds (public, very strict - token guessing prevention)
  */
 @Controller('nodes')
 export class NodesController {
@@ -23,10 +28,12 @@ export class NodesController {
    * Create node enrollment token
    *
    * Admin only - requires ADMIN role
+   * Rate-limited to 5 requests per 60 seconds
    */
   @Post('enroll')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   createEnrollment(@Body() dto: CreateEnrollmentDto) {
     return this.nodes.createEnrollment(dto);
   }
@@ -35,8 +42,10 @@ export class NodesController {
    * Register a node using enrollment token
    *
    * Public endpoint - used by agent during initial setup
+   * Rate-limited to 3 requests per 60 seconds to prevent token guessing attacks
    */
   @Post('register')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   register(@Body() dto: RegisterNodeDto) {
     return this.nodes.registerNode(dto);
   }
